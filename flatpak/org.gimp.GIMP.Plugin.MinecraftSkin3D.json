@@ -1,0 +1,29 @@
+{
+    "id": "org.gimp.GIMP.Plugin.MinecraftSkin3D",
+    "branch": "3",
+    "runtime": "org.gimp.GIMP",
+    "runtime-version": "stable",
+    "sdk": "org.gnome.Sdk//49",
+    "build-extension": true,
+    "build-options": {
+        "prefix": "/app/extensions/MinecraftSkin3D"
+    },
+    "modules": [
+        {
+            "name": "MinecraftSkin3D",
+            "buildsystem": "simple",
+            "sources": [
+                {
+                    "type": "git",
+                    "url": "https://github.com/MomoPewpew/GNUMC.git",
+                    "tag": "v1.0.0"
+                }
+            ],
+            "build-commands": [
+                "install -d ${FLATPAK_DEST}/plug-ins/minecraft-skin-3d",
+                "cp -r minecraft-skin-3d/* ${FLATPAK_DEST}/plug-ins/minecraft-skin-3d/",
+                "chmod +x ${FLATPAK_DEST}/plug-ins/minecraft-skin-3d/minecraft-skin-3d.py"
+            ]
+        }
+    ]
+}

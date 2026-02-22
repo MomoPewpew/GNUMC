@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="addon">
+  <id>org.gimp.GIMP.Plugin.MinecraftSkin3D</id>
+  <extends>org.gimp.GIMP</extends>
+  <name>Minecraft Skin 3D Editor</name>
+  <summary>Live 3D preview and editing of Minecraft player skins</summary>
+  <description>
+    <p>
+      A GIMP plugin that provides a live 3D preview of Minecraft player skins.
+      Edit your skin in GIMP's 2D editor and see the changes in real time on a
+      rotatable 3D player model. Paint, select, and fill directly on the 3D view
+      using familiar GIMP tools — Pencil, Paintbrush, Eraser, Airbrush, Bucket
+      Fill, Color Picker, and Fuzzy Select are all supported.
+    </p>
+    <p>Features include:</p>
+    <ul>
+      <li>Live 3D preview with composite layer rendering</li>
+      <li>Tool forwarding with click modifiers (Shift/Ctrl/Alt)</li>
+      <li>Steve and Alex model variants with overlay toggle</li>
+      <li>Standing, walking, and T-pose presets</li>
+      <li>Pixel grid overlay and marching-ants selection highlight</li>
+      <li>Undo/Redo support (Ctrl+Z / Ctrl+Y)</li>
+    </ul>
+  </description>
+  <url type="homepage">https://github.com/MomoPewpew/GNUMC</url>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <releases>
+    <release date="2026-02-22" version="1.0.0"/>
+  </releases>
+</component>
