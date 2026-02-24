@@ -589,11 +589,28 @@ class MinecraftSkin3DWindow(Gtk.Window):
         import ctypes
         import ctypes.util
 
-        x11_name = ctypes.util.find_library("X11") or "libX11.so.6"
-        xtst_name = ctypes.util.find_library("Xtst") or "libXtst.so.6"
+        vendor_lib = os.path.join(PLUGIN_DIR, "vendor", "lib")
+        
+        def _load_lib(name, fallback):
+            path = os.path.join(vendor_lib, fallback)
+            if os.path.exists(path):
+                try:
+                    return ctypes.cdll.LoadLibrary(path)
+                except Exception as exc:
+                    _log(f"Failed to load vendored {fallback}: {exc}")
+            
+            # Fallback to system search
+            found = ctypes.util.find_library(name) or fallback
+            return ctypes.cdll.LoadLibrary(found)
 
-        libX11 = ctypes.cdll.LoadLibrary(x11_name)
-        libXtst = ctypes.cdll.LoadLibrary(xtst_name)
+        try:
+            # Load libXext if vendored (dependency of libXtst)
+            _load_lib("Xext", "libXext.so.6")
+            libX11 = _load_lib("X11", "libX11.so.6")
+            libXtst = _load_lib("Xtst", "libXtst.so.6")
+        except Exception as exc:
+            _log(f"Final library load failure: {exc}")
+            return
 
         VP = ctypes.c_void_p
         UL = ctypes.c_ulong
@@ -1228,4 +1245,5 @@ class MinecraftSkin3D(Gimp.PlugIn):
         return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
 
 
-Gimp.main(MinecraftSkin3D.__gtype__, sys.argv)
+if __name__ == "__main__":
+    Gimp.main(MinecraftSkin3D.__gtype__, sys.argv)
