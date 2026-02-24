@@ -201,9 +201,9 @@ class PlayerModel:
         elif pose_index == 2:  # T-pose / arms out
             for part in self.get_all_parts():
                 if "rightArm" in part.name or "rightSleeve" in part.name:
-                    part.rotation = (0, 0, 90)
-                elif "leftArm" in part.name or "leftSleeve" in part.name:
                     part.rotation = (0, 0, -90)
+                elif "leftArm" in part.name or "leftSleeve" in part.name:
+                    part.rotation = (0, 0, 90)
 
 
 def _rotate_point(px, py, pz, pivot, rotation_deg):
