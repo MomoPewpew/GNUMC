@@ -586,6 +586,10 @@ class MinecraftSkin3DWindow(Gtk.Window):
         if cls._x11_libs is not None:
             return cls._x11_libs
 
+        import sys
+        if sys.platform != "linux":
+            return (), ()
+
         import ctypes
         import ctypes.util
 
@@ -648,8 +652,31 @@ class MinecraftSkin3DWindow(Gtk.Window):
         import ctypes
         import os
 
+        if sys.platform == "win32":
+            import ctypes
+            # Simplified VK mapping for Undo/Redo
+            vk = 0x5A if key_char in ("z", "Z") else 0x59 if key_char in ("y", "Y") else None
+            if not vk:
+                return
+
+            VK_CONTROL, VK_SHIFT, KEYEVENTF_KEYUP = 0x11, 0x10, 0x0002
+            user32 = ctypes.windll.user32
+            
+            if ctrl: user32.keybd_event(VK_CONTROL, 0, 0, 0)
+            if shift: user32.keybd_event(VK_SHIFT, 0, 0, 0)
+            user32.keybd_event(vk, 0, 0, 0)
+            user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
+            if shift: user32.keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0)
+            if ctrl: user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
+            
+            _log(f"_send_key_to_gimp (Windows): sent {key_char}")
+            return
+
         try:
-            libX11, libXtst = self._get_x11_libs()
+            res = self._get_x11_libs()
+            if not res or not res[0]:
+                return
+            libX11, libXtst = res
         except Exception as exc:
             _log(f"X11 libs not available: {exc}")
             self.status_bar.set_text("Undo not supported (no libXtst)")
