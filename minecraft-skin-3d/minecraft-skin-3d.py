@@ -17,6 +17,7 @@ from gi.repository import Gimp, GimpUi, Gtk, Gdk, GLib
 import hashlib
 import os
 import traceback
+import time
 
 try:
     gi.require_version("Gegl", "0.4")
@@ -94,6 +95,7 @@ class MinecraftSkin3DWindow(Gtk.Window):
         self._show_overlay = True
         self._show_selection_overlay = True
         self.has_selection_cached = False
+        self._last_undo_redo_time = 0
 
         self._build_ui()
         self._connect_events()
@@ -352,6 +354,10 @@ class MinecraftSkin3DWindow(Gtk.Window):
             return True
 
         if ctrl and event.keyval in (Gdk.KEY_z, Gdk.KEY_Z):
+            # Recursion protection for Windows (synthetic loop)
+            if time.time() - getattr(self, "_last_undo_redo_time", 0) < 0.25:
+                return True # Consume synthetic event
+            
             held = {"ctrl": bool(ctrl), "shift": bool(shift)}
             if shift:
                 self._gimp_redo(restore_mods=held)
@@ -662,6 +668,8 @@ class MinecraftSkin3DWindow(Gtk.Window):
             VK_CONTROL, VK_SHIFT, KEYEVENTF_KEYUP = 0x11, 0x10, 0x0002
             user32 = ctypes.windll.user32
             
+            self._last_undo_redo_time = time.time()
+            
             if ctrl: user32.keybd_event(VK_CONTROL, 0, 0, 0)
             if shift: user32.keybd_event(VK_SHIFT, 0, 0, 0)
             user32.keybd_event(vk, 0, 0, 0)
@@ -673,6 +681,7 @@ class MinecraftSkin3DWindow(Gtk.Window):
             return
 
         try:
+            self._last_undo_redo_time = time.time()
             res = self._get_x11_libs()
             if not res or not res[0]:
                 return
