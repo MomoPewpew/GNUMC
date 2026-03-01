@@ -91,7 +91,7 @@ class BoxPart:
 
         quads = []
 
-        # Front face (facing -Z direction, the face the player looks out of)
+        # Front face (facing -Z direction)
         face = "front"
         uv = self.uvs[face]
         u0, v0, u1, v1 = uv
@@ -99,7 +99,7 @@ class BoxPart:
             (x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0)
         ]
         uvs = [
-            (u1, v1), (u0, v1), (u0, v0), (u1, v0)
+            (u0, v1), (u1, v1), (u1, v0), (u0, v0)
         ]
         quads.append((face, verts, uvs))
 
@@ -111,7 +111,7 @@ class BoxPart:
             (x1, y0, z1), (x0, y0, z1), (x0, y1, z1), (x1, y1, z1)
         ]
         uvs = [
-            (u1, v1), (u0, v1), (u0, v0), (u1, v0)
+            (u0, v1), (u1, v1), (u1, v0), (u0, v0)
         ]
         quads.append((face, verts, uvs))
 
@@ -123,7 +123,7 @@ class BoxPart:
             (x0, y0, z1), (x0, y0, z0), (x0, y1, z0), (x0, y1, z1)
         ]
         uvs = [
-            (u1, v1), (u0, v1), (u0, v0), (u1, v0)
+            (u0, v1), (u1, v1), (u1, v0), (u0, v0)
         ]
         quads.append((face, verts, uvs))
 
@@ -135,7 +135,7 @@ class BoxPart:
             (x1, y0, z0), (x1, y0, z1), (x1, y1, z1), (x1, y1, z0)
         ]
         uvs = [
-            (u1, v1), (u0, v1), (u0, v0), (u1, v0)
+            (u0, v1), (u1, v1), (u1, v0), (u0, v0)
         ]
         quads.append((face, verts, uvs))
 
@@ -147,7 +147,7 @@ class BoxPart:
             (x0, y1, z0), (x1, y1, z0), (x1, y1, z1), (x0, y1, z1)
         ]
         uvs = [
-            (u0, v0), (u1, v0), (u1, v1), (u0, v1)
+            (u0, v1), (u1, v1), (u1, v0), (u0, v0)
         ]
         quads.append((face, verts, uvs))
 
@@ -159,7 +159,7 @@ class BoxPart:
             (x0, y0, z1), (x1, y0, z1), (x1, y0, z0), (x0, y0, z0)
         ]
         uvs = [
-            (u0, v0), (u1, v0), (u1, v1), (u0, v1)
+            (u0, v1), (u1, v1), (u1, v0), (u0, v0)
         ]
         quads.append((face, verts, uvs))
 
