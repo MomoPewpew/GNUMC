@@ -41,6 +41,64 @@ sys.path.insert(0, os.path.join(PLUGIN_DIR, "vendor"))
 sys.path.insert(0, PLUGIN_DIR)
 
 
+def _gimp_item_is_valid(obj):
+    if obj is None:
+        return False
+    try:
+        iv = getattr(obj, "is_valid", None)
+        if iv is not None:
+            return bool(iv() if callable(iv) else iv)
+        return True
+    except Exception:
+        return False
+
+
+def _gimp_enumerate_images():
+    """Return open images in GIMP's internal order (same as PDB gimp-get-images)."""
+    for getter in (getattr(Gimp, "get_images", None),
+                   getattr(Gimp, "list_images", None)):
+        if not callable(getter):
+            continue
+        try:
+            raw = getter()
+            if raw is None:
+                continue
+            out = list(raw)
+            if out:
+                return out
+        except Exception:
+            continue
+    try:
+        pdb = Gimp.get_pdb()
+        proc = pdb.lookup_procedure("gimp-get-images")
+        if proc is None:
+            return []
+        result = proc.run(proc.create_config())
+        if result.index(0) != Gimp.PDBStatusType.SUCCESS:
+            return []
+        arr = result.index(1)
+        if arr is None:
+            return []
+        return list(arr)
+    except Exception:
+        return []
+
+
+def _gimp_context_get_image_try():
+    """Use context image when the GI binding exposes it (matches focused image)."""
+    for name in ("context_get_image", "get_context_image"):
+        fn = getattr(Gimp, name, None)
+        if not callable(fn):
+            continue
+        try:
+            im = fn()
+            if im is not None and _gimp_item_is_valid(im):
+                return im
+        except Exception:
+            continue
+    return None
+
+
 def _lazy_import():
     """Import OpenGL-dependent modules only when the plugin is actually run,
     not during GIMP's registration query.  This avoids a hard crash when
@@ -61,10 +119,14 @@ class MinecraftSkin3DWindow(Gtk.Window):
     (e.g. in the taskbar and when Alt-Tabbing).
     """
 
+    _HINT_DEFAULT = (
+        "Left: tool | Middle/Right: rotate | Scroll: zoom | "
+        "Shift/Ctrl: modify | Ctrl+Z/Y: undo/redo"
+    )
+    _HINT_NO_IMAGE = "No image open in GIMP — open a skin to sync the preview"
+
     def __init__(self, image, drawable):
         super().__init__(title="Minecraft Skin 3D Preview")
-        self.image = image
-        self.drawable = drawable
         self.set_default_size(600, 700)
 
         try:
@@ -96,14 +158,12 @@ class MinecraftSkin3DWindow(Gtk.Window):
         self._show_selection_overlay = True
         self.has_selection_cached = False
         self._last_undo_redo_time = 0
+        self._image_was_usable = True
+        self._work_image_id = None
+        self._undo_primed_for_id = None
 
         self._build_ui()
         self._connect_events()
-
-        try:
-            self.image.undo_enable()
-        except Exception:
-            pass
 
         GLib.timeout_add(50, self._poll_texture)
 
@@ -111,12 +171,63 @@ class MinecraftSkin3DWindow(Gtk.Window):
     def active_model(self):
         return self.alex_model if self.use_alex else self.model
 
+    def _work_image(self):
+        """Image to sync and paint into: context image if available, else open images.
+
+        With several images open and no context_get_image in the binding, we pick
+        the image with the largest ID (usually the most recently created).
+        """
+        im = _gimp_context_get_image_try()
+        if im is not None:
+            self._note_work_image(im.get_id())
+            return im
+
+        all_im = _gimp_enumerate_images()
+        valid = [x for x in all_im if _gimp_item_is_valid(x)]
+        if not valid:
+            self._note_work_image(None)
+            return None
+        if len(valid) == 1:
+            self._note_work_image(valid[0].get_id())
+            return valid[0]
+        try:
+            im = max(valid, key=lambda z: z.get_id())
+        except Exception:
+            im = valid[0]
+        self._note_work_image(im.get_id())
+        return im
+
+    def _note_work_image(self, new_id):
+        if new_id == self._work_image_id:
+            return
+        self._work_image_id = new_id
+        self._pdb_diagnosed = False
+        self._last_texture_hash = None
+        self._last_selection_hash = None
+        self._fuzzy_drag = None
+        self._undo_primed_for_id = None
+
+    def _maybe_prime_undo(self, img):
+        if img is None:
+            return
+        iid = img.get_id()
+        if self._undo_primed_for_id == iid:
+            return
+        try:
+            img.undo_enable()
+        except Exception:
+            pass
+        self._undo_primed_for_id = iid
+
     def _get_drawable(self):
         """Return the active drawable, compatible with GIMP 3.0+."""
-        drawables = self.image.get_selected_drawables()
+        img = self._work_image()
+        if img is None:
+            return None
+        drawables = img.get_selected_drawables()
         if drawables:
             return drawables[0]
-        layers = self.image.get_layers()
+        layers = img.get_layers()
         if layers:
             return layers[0]
         return None
@@ -233,7 +344,7 @@ class MinecraftSkin3DWindow(Gtk.Window):
 
         vbox.pack_start(self.gl_area, True, True, 0)
 
-        self.status_bar = Gtk.Label(label="Left: tool | Middle/Right: rotate | Scroll: zoom | Shift/Ctrl: modify | Ctrl+Z/Y: undo/redo")
+        self.status_bar = Gtk.Label(label=self._HINT_DEFAULT)
         self.status_bar.set_xalign(0)
         self.status_bar.set_margin_start(6)
         self.status_bar.set_margin_top(2)
@@ -434,6 +545,8 @@ class MinecraftSkin3DWindow(Gtk.Window):
     def _pdb_diagnose(self):
         if self._pdb_diagnosed:
             return
+        if self._work_image() is None:
+            return
         self._pdb_diagnosed = True
         _log("=== PDB diagnostic ===")
 
@@ -509,9 +622,11 @@ class MinecraftSkin3DWindow(Gtk.Window):
                     _log(f"  [{name}] NOT FOUND")
 
         _log("  --- Image undo attrs ---")
-        for attr in dir(self.image):
-            if "undo" in attr.lower():
-                _log(f"  image.{attr}")
+        img = self._work_image()
+        if img is not None:
+            for attr in dir(img):
+                if "undo" in attr.lower():
+                    _log(f"  image.{attr}")
 
         _log("=== end ===")
 
@@ -551,6 +666,9 @@ class MinecraftSkin3DWindow(Gtk.Window):
         """
         fd = self._fuzzy_drag
         if fd is None:
+            return
+        if self._work_image() is None:
+            self._fuzzy_drag = None
             return
 
         dx = mx - fd["start_mx"]
@@ -826,6 +944,9 @@ class MinecraftSkin3DWindow(Gtk.Window):
         *start*     — True for the initial click, False for drag.
         *modifiers* — dict with 'shift', 'ctrl', 'alt' booleans.
         """
+        if self._work_image() is None:
+            self.status_bar.set_text(self._HINT_NO_IMAGE)
+            return
         self._pdb_diagnose()
         mods = modifiers or {}
 
@@ -906,7 +1027,9 @@ class MinecraftSkin3DWindow(Gtk.Window):
             fill_type = Gimp.FillType.FOREGROUND
         self._do_fuzzy_select(drawable, x, y)
         Gimp.drawable_edit_fill(drawable, fill_type)
-        Gimp.Selection.none(self.image)
+        img = self._work_image()
+        if img is not None:
+            Gimp.Selection.none(img)
 
     # -- color picker -----------------------------------------------------
 
@@ -936,8 +1059,12 @@ class MinecraftSkin3DWindow(Gtk.Window):
         if operation is None:
             operation = Gimp.ChannelOps.REPLACE
 
+        img = self._work_image()
+        if img is None:
+            raise RuntimeError("no open image for fuzzy select")
+
         # Strategy 1: direct GI method on Image
-        fn = getattr(self.image, "select_contiguous_color", None)
+        fn = getattr(img, "select_contiguous_color", None)
         if fn is not None:
             try:
                 Gimp.context_set_sample_threshold(threshold / 255.0)
@@ -973,7 +1100,7 @@ class MinecraftSkin3DWindow(Gtk.Window):
 
             config = proc.create_config()
             props = {
-                "image": self.image,
+                "image": img,
                 "drawable": drawable,
                 "x": x,
                 "y": y,
@@ -1008,6 +1135,30 @@ class MinecraftSkin3DWindow(Gtk.Window):
         if not self.get_visible():
             return True
 
+        img = self._work_image()
+        usable = img is not None
+        if not usable:
+            if self._image_was_usable:
+                self._image_was_usable = False
+                self.status_bar.set_text(self._HINT_NO_IMAGE)
+                self._last_texture_hash = None
+                self._last_selection_hash = None
+                if self._show_selection_overlay:
+                    try:
+                        self.gl_area.make_current()
+                        self.renderer.update_selection_texture(None, 0, 0)
+                        self.has_selection_cached = False
+                        self.gl_area.queue_render()
+                    except Exception:
+                        pass
+            return True
+
+        if not self._image_was_usable:
+            self._image_was_usable = True
+            self.status_bar.set_text(self._HINT_DEFAULT)
+
+        self._maybe_prime_undo(img)
+
         try:
             self._sync_texture()
             self._sync_selection()
@@ -1017,7 +1168,8 @@ class MinecraftSkin3DWindow(Gtk.Window):
 
     def _force_texture_sync(self):
         self._last_texture_hash = None
-        self._sync_texture()
+        if self._work_image() is not None:
+            self._sync_texture()
 
     def _upload_pixels(self, pixel_data, width, height, read_bpp):
         """Convert to RGBA if needed, hash-check, and upload to GL."""
@@ -1040,12 +1192,15 @@ class MinecraftSkin3DWindow(Gtk.Window):
         self.gl_area.queue_render()
 
     def _sync_texture(self):
-        width = self.image.get_width()
-        height = self.image.get_height()
+        img = self._work_image()
+        if img is None:
+            return
+        width = img.get_width()
+        height = img.get_height()
         if width == 0 or height == 0:
             return
 
-        layers = self.image.get_layers()
+        layers = img.get_layers()
         visible = [l for l in layers if l.get_visible()]
 
         if not visible:
@@ -1188,8 +1343,11 @@ class MinecraftSkin3DWindow(Gtk.Window):
         """Read the GIMP selection mask and update the selection overlay texture."""
         if not self._show_selection_overlay or self.renderer is None:
             return
+        img = self._work_image()
+        if img is None:
+            return
         try:
-            is_empty = Gimp.Selection.is_empty(self.image)
+            is_empty = Gimp.Selection.is_empty(img)
             if is_empty:
                 if self.has_selection_cached:
                     self.renderer.update_selection_texture(None, 0, 0)
@@ -1198,10 +1356,10 @@ class MinecraftSkin3DWindow(Gtk.Window):
                     self.gl_area.queue_render()
                 return
 
-            width = self.image.get_width()
-            height = self.image.get_height()
+            width = img.get_width()
+            height = img.get_height()
 
-            channel = self.image.get_selection()
+            channel = img.get_selection()
             if channel is None:
                 return
 

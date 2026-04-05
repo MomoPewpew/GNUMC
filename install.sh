@@ -26,7 +26,7 @@ error() { echo "${RED}[x]${RESET} $*"; }
 # ── Detect GIMP installation ───────────────────────────────────────────────
 
 find_gimp_binary() {
-    for cmd in gimp gimp-2.99 gimp-3.0 flatpak; do
+    for cmd in gimp gimp-3.2 flatpak; do
         if command -v "$cmd" &>/dev/null; then
             if [[ "$cmd" == "flatpak" ]]; then
                 if flatpak list --app 2>/dev/null | grep -qi gimp; then
@@ -54,28 +54,25 @@ detect_gimp_version() {
 detect_plugin_dir() {
     local candidates=()
 
-    # GIMP 3.0 locations
+    # GIMP 3.2 locations
     candidates+=(
-        "$HOME/.config/GIMP/3.0/plug-ins"
-        "$HOME/.config/GIMP/2.99/plug-ins"
-        "$HOME/Library/Application Support/GIMP/3.0/plug-ins"
-        "$HOME/Library/Application Support/GIMP/2.99/plug-ins"
+        "$HOME/.config/GIMP/3.2/plug-ins"
+        "$HOME/Library/Application Support/GIMP/3.2/plug-ins"
     )
 
     # Flatpak GIMP
     candidates+=(
-        "$HOME/.var/app/org.gimp.GIMP/config/GIMP/3.0/plug-ins"
-        "$HOME/.var/app/org.gimp.GIMP/config/GIMP/2.99/plug-ins"
+        "$HOME/.var/app/org.gimp.GIMP/config/GIMP/3.2/plug-ins"
     )
 
     # Snap GIMP
     candidates+=(
-        "$HOME/snap/gimp/current/.config/GIMP/3.0/plug-ins"
+        "$HOME/snap/gimp/current/.config/GIMP/3.2/plug-ins"
     )
 
     # Windows (Git Bash / MSYS2)
     if [[ -n "${APPDATA:-}" ]]; then
-        candidates+=("$APPDATA/GIMP/3.0/plug-ins")
+        candidates+=("$APPDATA/GIMP/3.2/plug-ins")
     fi
 
     # Check which config parent already exists (= GIMP has run at least once)
@@ -119,7 +116,7 @@ do_install() {
     if plugin_dir="$(detect_plugin_dir)"; then
         info "Plugin directory: $plugin_dir"
     else
-        plugin_dir="$HOME/.config/GIMP/3.0/plug-ins"
+        plugin_dir="$HOME/.config/GIMP/3.2/plug-ins"
         warn "Could not auto-detect plugin dir, using default: $plugin_dir"
     fi
 
@@ -165,7 +162,7 @@ do_uninstall() {
     if plugin_dir="$(detect_plugin_dir)"; then
         :
     else
-        plugin_dir="$HOME/.config/GIMP/3.0/plug-ins"
+        plugin_dir="$HOME/.config/GIMP/3.2/plug-ins"
     fi
 
     if [[ -n "${GIMP_PLUGIN_DIR:-}" ]]; then
