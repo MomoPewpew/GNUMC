@@ -15,9 +15,10 @@ def test_uvs():
     # Back:  (24, 8) to (32, 16)
     # Top:   (8, 0) to (16, 8)
     # Bottom:(16, 0) to (24, 8)
+    from model import transform_part
     head = BoxPart("head", (0, 0, 0), (8, 8, 8), (0, 0))
     
-    quads = head.get_face_quads()
+    quads = transform_part(head)
     
     for face, verts, uvs in quads:
         print(f"Face: {face}")

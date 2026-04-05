@@ -7,6 +7,10 @@ Supports bidirectional interaction: paint/select on the 3D view or the 2D canvas
 
 import sys
 import gi
+import os
+import traceback
+import time
+import hashlib
 
 gi.require_version("Gimp", "3.0")
 gi.require_version("GimpUi", "3.0")
@@ -14,16 +18,16 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 
 from gi.repository import Gimp, GimpUi, Gtk, Gdk, GLib
-import hashlib
-import os
-import traceback
-import time
+
+Renderer = None
+RayCaster = None
 
 try:
     gi.require_version("Gegl", "0.4")
     from gi.repository import Gegl as _Gegl
 except Exception:
     _Gegl = None
+
 
 _LOG_PATH = os.path.join(os.path.expanduser("~"), ".config", "GIMP", "3.0",
                          "minecraft-skin-3d.log")
@@ -40,15 +44,18 @@ PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(PLUGIN_DIR, "vendor"))
 sys.path.insert(0, PLUGIN_DIR)
 
+from model import SteveModel, AlexModel, add_canine_tail
+
 
 def _lazy_import():
-    """Import OpenGL-dependent modules only when the plugin is actually run,
-    not during GIMP's registration query.  This avoids a hard crash when
-    PyOpenGL is not yet installed."""
-    global SteveModel, AlexModel, Renderer, RayCaster
-    from model import SteveModel, AlexModel
-    from renderer import Renderer
-    from interaction import RayCaster
+    """Import OpenGL-dependent modules only when the plugin is actually run."""
+    global Renderer, RayCaster
+    try:
+        from renderer import Renderer
+        from interaction import RayCaster
+    except Exception as e:
+        _log(f"Lazy import failed: {e}\n{traceback.format_exc()}")
+        raise
 
 
 class MinecraftSkin3DWindow(Gtk.Window):
@@ -148,10 +155,14 @@ class MinecraftSkin3DWindow(Gtk.Window):
         self.grid_toggle.connect("toggled", self._on_grid_toggled)
         toolbar.pack_start(self.grid_toggle, False, False, 0)
 
-        self.overlay_toggle = Gtk.ToggleButton(label="Outer Layer")
+        self.overlay_toggle = Gtk.ToggleButton(label="Overlay")
         self.overlay_toggle.set_active(True)
         self.overlay_toggle.connect("toggled", self._on_overlay_toggled)
         toolbar.pack_start(self.overlay_toggle, False, False, 0)
+
+        self.tail_toggle = Gtk.ToggleButton(label="Tail")
+        self.tail_toggle.connect("toggled", self._on_tail_toggled)
+        toolbar.pack_start(self.tail_toggle, False, False, 0)
 
         sep2 = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
         toolbar.pack_start(sep2, False, False, 4)
@@ -376,10 +387,33 @@ class MinecraftSkin3DWindow(Gtk.Window):
         self.use_alex = combo.get_active() == 1
         pose_index = self.pose_combo.get_active()
         self.active_model.set_pose(pose_index)
+        self._refresh_model_parts()
         if self.renderer:
             self.gl_area.make_current()
             self.renderer.build_model_buffers(self.active_model)
             self.gl_area.queue_render()
+
+    def _on_tail_toggled(self, btn):
+        self._refresh_model_parts()
+        if self.renderer:
+            self.gl_area.make_current()
+            self.renderer.build_model_buffers(self.active_model)
+            self.gl_area.queue_render()
+
+    def _refresh_model_parts(self):
+        """Update extra parts list based on UI toggles."""
+        # Both models should have their extra parts managed
+        for model in (self.model, self.alex_model):
+            model.extra_parts = []
+            # Clear children of body to avoid duplication
+            body = next((p for p in model.base_parts if p.name == "body"), None)
+            if body:
+                # Keep only standard children (like arms/legs)
+                standard_names = {p.name for p in model.base_parts + model.overlay_parts}
+                body.children = [c for c in body.children if c.name in standard_names]
+            
+            if self.tail_toggle.get_active():
+                add_canine_tail(model)
 
     def _on_grid_toggled(self, btn):
         self._show_grid = btn.get_active()
@@ -396,6 +430,7 @@ class MinecraftSkin3DWindow(Gtk.Window):
             return
         pose_index = combo.get_active()
         self.active_model.set_pose(pose_index)
+        self._refresh_model_parts()
         self.gl_area.make_current()
         self.renderer.build_model_buffers(self.active_model)
         self.gl_area.queue_render()
@@ -1262,23 +1297,28 @@ class MinecraftSkin3D(Gimp.PlugIn):
         return None
 
     def _run(self, procedure, run_mode, image, drawables, config, data):
-        if not drawables:
-            return procedure.new_return_values(
-                Gimp.PDBStatusType.CALLING_ERROR, GLib.Error()
-            )
+        try:
+            _log(f"--- Running plugin ---")
+            if not drawables:
+                return procedure.new_return_values(
+                    Gimp.PDBStatusType.CALLING_ERROR, GLib.Error()
+                )
 
-        _lazy_import()
+            _lazy_import()
 
-        drawable = drawables[0]
+            drawable = drawables[0]
 
-        GimpUi.init("minecraft-skin-3d")
+            GimpUi.init("minecraft-skin-3d")
 
-        win = MinecraftSkin3DWindow(image, drawable)
-        win.show_all()
+            win = MinecraftSkin3DWindow(image, drawable)
+            win.show_all()
 
-        Gtk.main()
+            Gtk.main()
 
-        return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+            return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+        except Exception as e:
+            _log(f"Critical failure in _run: {e}\n{traceback.format_exc()}")
+            return procedure.new_return_values(Gimp.PDBStatusType.EXECUTION_ERROR, GLib.Error())
 
 
 if __name__ == "__main__":

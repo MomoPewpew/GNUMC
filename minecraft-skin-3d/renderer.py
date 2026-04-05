@@ -11,7 +11,7 @@ import struct
 from OpenGL.GL import *
 from OpenGL.GL import shaders as gl_shaders
 
-from model import get_transformed_quads
+from model import transform_part
 from mathutil import (
     identity as _identity,
     perspective as _perspective,
@@ -110,7 +110,7 @@ class Renderer:
         def _add_parts(parts):
             nonlocal vertex_offset
             for part in parts:
-                quads = get_transformed_quads(part)
+                quads = transform_part(part)
                 for face_name, verts, uvs in quads:
                     # Compute face normal from first triangle
                     v0, v1, v2 = verts[0], verts[1], verts[2]
@@ -140,6 +140,7 @@ class Renderer:
         self._overlay_index_offset = len(indices)
 
         _add_parts(model.overlay_parts)
+        _add_parts(model.extra_parts)
 
         self._index_count = len(indices)
         self._vertex_count = vertex_offset

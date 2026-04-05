@@ -62,10 +62,10 @@ class BoxPart:
     """A single box in the player model."""
 
     __slots__ = ("name", "origin", "size", "uv_origin", "inflate", "uvs",
-                 "pivot", "rotation")
+                 "pivot", "rotation", "parent", "children")
 
     def __init__(self, name, origin, size, uv_origin, inflate=0.0,
-                 pivot=None, rotation=None):
+                 pivot=None, rotation=None, parent=None):
         self.name = name
         ox, oy, oz = origin
         w, h, d = size
@@ -76,14 +76,16 @@ class BoxPart:
         self.inflate = inflate
         self.uvs = _box_uvs(uv_origin[0], uv_origin[1], w, h, d)
         self.pivot = pivot or (ox + w / 2, oy + h / 2, oz + d / 2)
-        self.rotation = rotation or (0, 0, 0)
+        self.rotation = [float(a) for a in (rotation or (0.0, 0.0, 0.0))]
+        self.parent = parent
+        self.children = []
+        if parent:
+            parent.children.append(self)
 
     def get_face_quads(self):
         """
         Return the 6 face quads as a list of (face_name, vertices, uvs).
         Each quad has 4 vertices (x,y,z) and 4 UV coords (u,v).
-        Vertices are in world space (Y-up), faces wound counter-clockwise
-        when viewed from outside.
         """
         x0, y0, z0 = self.origin
         w, h, d = self.size
@@ -95,115 +97,86 @@ class BoxPart:
         face = "front"
         uv = self.uvs[face]
         u0, v0, u1, v1 = uv
-        verts = [
-            (x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0)
-        ]
-        uvs = [
-            (u0, v1), (u1, v1), (u1, v0), (u0, v0)
-        ]
+        verts = [(x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0)]
+        uvs = [(u0, v1), (u1, v1), (u1, v0), (u0, v0)]
         quads.append((face, verts, uvs))
 
         # Back face (facing +Z)
         face = "back"
         uv = self.uvs[face]
         u0, v0, u1, v1 = uv
-        verts = [
-            (x1, y0, z1), (x0, y0, z1), (x0, y1, z1), (x1, y1, z1)
-        ]
-        uvs = [
-            (u0, v1), (u1, v1), (u1, v0), (u0, v0)
-        ]
+        verts = [(x1, y0, z1), (x0, y0, z1), (x0, y1, z1), (x1, y1, z1)]
+        uvs = [(u0, v1), (u1, v1), (u1, v0), (u0, v0)]
         quads.append((face, verts, uvs))
 
         # Right face (facing -X)
         face = "right"
         uv = self.uvs[face]
         u0, v0, u1, v1 = uv
-        verts = [
-            (x0, y0, z1), (x0, y0, z0), (x0, y1, z0), (x0, y1, z1)
-        ]
-        uvs = [
-            (u0, v1), (u1, v1), (u1, v0), (u0, v0)
-        ]
+        verts = [(x0, y0, z1), (x0, y0, z0), (x0, y1, z0), (x0, y1, z1)]
+        uvs = [(u0, v1), (u1, v1), (u1, v0), (u0, v0)]
         quads.append((face, verts, uvs))
 
         # Left face (facing +X)
         face = "left"
         uv = self.uvs[face]
         u0, v0, u1, v1 = uv
-        verts = [
-            (x1, y0, z0), (x1, y0, z1), (x1, y1, z1), (x1, y1, z0)
-        ]
-        uvs = [
-            (u0, v1), (u1, v1), (u1, v0), (u0, v0)
-        ]
+        verts = [(x1, y0, z0), (x1, y0, z1), (x1, y1, z1), (x1, y1, z0)]
+        uvs = [(u0, v1), (u1, v1), (u1, v0), (u0, v0)]
         quads.append((face, verts, uvs))
 
         # Top face (facing +Y)
         face = "top"
         uv = self.uvs[face]
         u0, v0, u1, v1 = uv
-        verts = [
-            (x0, y1, z0), (x1, y1, z0), (x1, y1, z1), (x0, y1, z1)
-        ]
-        uvs = [
-            (u0, v1), (u1, v1), (u1, v0), (u0, v0)
-        ]
+        verts = [(x0, y1, z0), (x1, y1, z0), (x1, y1, z1), (x0, y1, z1)]
+        uvs = [(u0, v1), (u1, v1), (u1, v0), (u0, v0)]
         quads.append((face, verts, uvs))
 
         # Bottom face (facing -Y)
         face = "bottom"
         uv = self.uvs[face]
         u0, v0, u1, v1 = uv
-        verts = [
-            (x0, y0, z1), (x1, y0, z1), (x1, y0, z0), (x0, y0, z0)
-        ]
-        uvs = [
-            (u0, v1), (u1, v1), (u1, v0), (u0, v0)
-        ]
+        verts = [(x0, y0, z1), (x1, y0, z1), (x1, y0, z0), (x0, y0, z0)]
+        uvs = [(u0, v1), (u1, v1), (u1, v0), (u0, v0)]
         quads.append((face, verts, uvs))
 
         return quads
 
 
-class PlayerModel:
-    """Base class for a Minecraft player model."""
+class PlanePart:
+    """A 2D plane in the player model (common in MPM)."""
 
-    def __init__(self):
-        self.base_parts = []
-        self.overlay_parts = []
-        self._pose_rotations = {}
+    __slots__ = ("name", "verts", "uvs", "pivot", "rotation", "parent", "children")
 
-    def get_all_parts(self):
-        return self.base_parts + self.overlay_parts
+    def __init__(self, name, origin, size, uv_origin, orientation="back",
+                 parent=None, pivot=None, rotation=None):
+        self.name = name
+        x, y, z = origin
+        w, h = size
+        u0, v0 = uv_origin
+        u1, v1 = (u0 + w) / TEX_W, (v0 + h) / TEX_H
+        u0, v0 = u0 / TEX_W, v0 / TEX_H
 
-    def set_pose(self, pose_index):
-        """
-        0 = standing (default), 1 = walking, 2 = arms out (T-pose)
-        """
-        self._apply_pose(pose_index)
+        if orientation == "back":
+            self.verts = [(x, y, z), (x + w, y, z), (x + w, y + h, z), (x, y + h, z)]
+        elif orientation == "top":
+            self.verts = [(x, y, z), (x + w, y, z), (x + w, y, z + h), (x, y, z + h)]
+        elif orientation == "side":
+            self.verts = [(x, y, z), (x, y, z + h), (x, y + h, z + h), (x, y + h, z)]
+        else:
+            self.verts = [(x, y, z), (x + w, y, z), (x + w, y + h, z), (x, y + h, z)]
 
-    def _apply_pose(self, pose_index):
-        for part in self.get_all_parts():
-            part.rotation = (0, 0, 0)
+        self.uvs = [(u0, v1), (u1, v1), (u1, v0), (u0, v0)]
+        self.pivot = pivot or (x, y, z)
+        self.rotation = [float(a) for a in (rotation or (0.0, 0.0, 0.0))]
+        self.parent = parent
+        self.children = []
+        if parent:
+            parent.children.append(self)
 
-        if pose_index == 1:  # walking
-            for part in self.get_all_parts():
-                if "rightArm" in part.name or "rightSleeve" in part.name:
-                    part.rotation = (30, 0, 0)
-                elif "leftArm" in part.name or "leftSleeve" in part.name:
-                    part.rotation = (-30, 0, 0)
-                elif "rightLeg" in part.name or "rightPants" in part.name:
-                    part.rotation = (-30, 0, 0)
-                elif "leftLeg" in part.name or "leftPants" in part.name:
-                    part.rotation = (30, 0, 0)
-
-        elif pose_index == 2:  # T-pose / arms out
-            for part in self.get_all_parts():
-                if "rightArm" in part.name or "rightSleeve" in part.name:
-                    part.rotation = (0, 0, -90)
-                elif "leftArm" in part.name or "leftSleeve" in part.name:
-                    part.rotation = (0, 0, 90)
+    def get_face_quads(self):
+        return [(self.name, self.verts, self.uvs)]
 
 
 def _rotate_point(px, py, pz, pivot, rotation_deg):
@@ -228,21 +201,69 @@ def _rotate_point(px, py, pz, pivot, rotation_deg):
     return (x + cx, y + cy, z + cz)
 
 
-def get_transformed_quads(part):
-    """Get face quads with pose rotation applied."""
+def transform_part(part):
+    """Recursively transform vertices of a part and its parents."""
     quads = part.get_face_quads()
-    rx, ry, rz = part.rotation
-    if rx == 0 and ry == 0 and rz == 0:
-        return quads
-
     transformed = []
+
     for face_name, verts, uvs in quads:
-        new_verts = [
-            _rotate_point(v[0], v[1], v[2], part.pivot, part.rotation)
-            for v in verts
-        ]
+        new_verts = []
+        for v in verts:
+            curr_v = v
+            curr_part = part
+            while curr_part:
+                if any(r != 0 for r in curr_part.rotation):
+                    curr_v = _rotate_point(curr_v[0], curr_v[1], curr_v[2],
+                                           curr_part.pivot, curr_part.rotation)
+                curr_part = curr_part.parent
+            new_verts.append(curr_v)
         transformed.append((face_name, new_verts, uvs))
+
     return transformed
+
+# Alias for compatibility with interaction.py
+get_transformed_quads = transform_part
+
+
+class PlayerModel:
+    """Base class for a Minecraft player model."""
+
+    def __init__(self):
+        self.base_parts = []
+        self.overlay_parts = []
+        self.extra_parts = []  # MPM parts
+        self._pose_rotations = {}
+
+    def get_all_parts(self):
+        return self.base_parts + self.overlay_parts + self.extra_parts
+
+    def set_pose(self, pose_index):
+        """
+        0 = standing (default), 1 = walking, 2 = arms out (T-pose)
+        """
+        self._apply_pose(pose_index)
+
+    def _apply_pose(self, pose_index):
+        for part in self.get_all_parts():
+            part.rotation = [0.0, 0.0, 0.0]
+
+        if pose_index == 1:  # walking
+            for part in self.get_all_parts():
+                if "rightArm" in part.name or "rightSleeve" in part.name:
+                    part.rotation = [30.0, 0.0, 0.0]
+                elif "leftArm" in part.name or "leftSleeve" in part.name:
+                    part.rotation = [-30.0, 0.0, 0.0]
+                elif "rightLeg" in part.name or "rightPants" in part.name:
+                    part.rotation = [-30.0, 0.0, 0.0]
+                elif "leftLeg" in part.name or "leftPants" in part.name:
+                    part.rotation = [30.0, 0.0, 0.0]
+
+        elif pose_index == 2:  # T-pose / arms out
+            for part in self.get_all_parts():
+                if "rightArm" in part.name or "rightSleeve" in part.name:
+                    part.rotation = [0.0, 0.0, -90.0]
+                elif "leftArm" in part.name or "leftSleeve" in part.name:
+                    part.rotation = [0.0, 0.0, 90.0]
 
 
 class SteveModel(PlayerModel):
@@ -317,3 +338,51 @@ class AlexModel(PlayerModel):
             BoxPart("leftPants",    (-0.1, 0, -2),(4, 12, 4), (0, 48),
                     inflate=0.5, pivot=(1.9, 12, 0)),
         ]
+
+
+def add_canine_tail(model):
+    """Add a canine tail (MPM style) to the model."""
+    body = next((p for p in model.base_parts if p.name == "body"), None)
+    if not body:
+        return
+
+    # In MPM, the tail is attached to the body. 
+    # We'll use the body's pivot as a reference.
+    # Base_1: setRotationPoint(0, 1, -1.2), rot(-25.7, 180, 0)
+    # Our Y is world-up (0-32). Body is y=12 to 24.
+    # Minecraft Y is down. Body top is 0, bottom is 12.
+    # So y=1 in MC is y=23 in our system? No, body bottom is 24 in MC?
+    # Minecraft biped body: box at (-4, 0, -2), size (8, 12, 4), rotPoint(0, 0, 0)
+    # So y=0 is the neck. y=12 is the waist.
+    # Tail Base_1 at y=1 (near neck? no, usually tails are at the bottom).
+    # Wait, MPM Naga legs... let's check Canine Tail again.
+    # setRotationPoint(0.0F, 1.0F, -1.2F)
+    # If the body is 12 high, y=1 is near the TOP?
+    # Actually, MC models are weird. 
+    # Let's assume y=11 (near bottom) for a tail.
+    
+    tail_base_y = 13.0 # Near bottom of body (12-24)
+    tail_base_z = 2.2  # Back of body (z is -2 to 2)
+    
+    # Base_1
+    base1 = BoxPart("tailBase1", (-1, tail_base_y, tail_base_z), (2, 3, 2), (56, 16),
+                    pivot=(0, tail_base_y, tail_base_z), parent=body)
+    base1.rotation = [-25.7, 180.0, 0.0]
+    model.extra_parts.append(base1)
+    
+    # Mid_1: Child of Base_1. addBox(-1, 3, -2.8, 2, 2, 2)
+    # In MC, box is relative to rotPoint.
+    mid1 = BoxPart("tailMid1", (-1, tail_base_y - 3, tail_base_z), (2, 2, 2), (56, 20),
+                   pivot=(0, tail_base_y - 3, tail_base_z), parent=base1)
+    mid1.rotation = [-9.0, 0.0, 0.0]
+    model.extra_parts.append(mid1)
+    
+    # Mid_2: Child of Mid_1. addBox(-1.5, 5, -1.5, 3, 6, 2)
+    mid2 = BoxPart("tailMid2", (-1.5, tail_base_y - 5, tail_base_z - 0.5), (3, 6, 2), (56, 22),
+                   pivot=(0, tail_base_y - 5, tail_base_z), parent=mid1)
+    model.extra_parts.append(mid2)
+    
+    # End_1: Child of Mid_2. addBox(-1, 10.7, -1, 2, 1, 2)
+    end1 = BoxPart("tailEnd1", (-1, tail_base_y - 11, tail_base_z), (2, 1, 2), (56, 29),
+                   pivot=(0, tail_base_y - 11, tail_base_z), parent=mid2)
+    model.extra_parts.append(end1)

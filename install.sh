@@ -140,12 +140,15 @@ do_install() {
     # Copy plugin files
     mkdir -p "$dest"
     cp -r "$SOURCE_DIR"/* "$dest"/
-    chmod +x "$dest/$PLUGIN_NAME.py"
-    info "Copied plugin files to $dest"
+    
+    # GIMP 3.0 requires the executable to match the folder name exactly
+    mv "$dest/$PLUGIN_NAME.py" "$dest/$PLUGIN_NAME"
+    chmod +x "$dest/$PLUGIN_NAME"
+    info "Copied and renamed plugin files to $dest"
 
     # Verify entry point
-    if [[ ! -f "$dest/$PLUGIN_NAME.py" ]]; then
-        error "Entry point $dest/$PLUGIN_NAME.py not found after copy!"
+    if [[ ! -f "$dest/$PLUGIN_NAME" ]]; then
+        error "Entry point $dest/$PLUGIN_NAME not found after copy!"
         exit 1
     fi
 
