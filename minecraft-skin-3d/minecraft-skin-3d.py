@@ -54,37 +54,56 @@ def _gimp_item_is_valid(obj):
 
 
 def _gimp_resolve_image(img):
-    """Re-fetch Image from GIMP by ID so we do not hold a stale proxy (e.g. during save)."""
+    """Re-fetch Image from GIMP by ID so we do not hold a stale proxy (e.g. during save).
+
+    If get_by_id exists and returns None, the ID is gone — never fall back to the old
+    wrapper or gimp-image-get-layers will see an invalid image ID.
+    """
     if img is None:
         return None
     fn = getattr(Gimp.Image, "get_by_id", None)
     if callable(fn):
         try:
-            cur = fn(img.get_id())
+            iid = img.get_id()
+            cur = fn(iid)
             if cur is not None and _gimp_item_is_valid(cur):
                 return cur
+            return None
         except Exception:
-            pass
-    return img if _gimp_item_is_valid(img) else None
+            return None
+    try:
+        return img if _gimp_item_is_valid(img) else None
+    except Exception:
+        return None
 
 
 def _gimp_resolve_item(item):
     """Re-fetch Item/Drawable/Layer/Channel by ID (layers can be replaced while saving)."""
     if item is None:
         return None
+    tried_get_by_id = False
     for cls in (getattr(Gimp, "Item", None), getattr(Gimp, "Drawable", None)):
         if cls is None:
             continue
         fn = getattr(cls, "get_by_id", None)
         if not callable(fn):
             continue
+        tried_get_by_id = True
         try:
             cur = fn(item.get_id())
-            if cur is not None and _gimp_item_is_valid(cur):
-                return cur
         except Exception:
             continue
-    return item if _gimp_item_is_valid(item) else None
+        if cur is None:
+            return None
+        if _gimp_item_is_valid(cur):
+            return cur
+        return None
+    if tried_get_by_id:
+        return None
+    try:
+        return item if _gimp_item_is_valid(item) else None
+    except Exception:
+        return None
 
 
 def _gimp_item_belongs_to_image(item, img):
@@ -100,6 +119,36 @@ def _gimp_item_belongs_to_image(item, img):
             return False
         return parent.get_id() == img.get_id()
     except Exception:
+        return False
+
+
+def _gimp_item_in_image_tree(item, img):
+    """True if item exists in this image's layer/item tree (stricter than get_image()).
+
+    Stale GObject wrappers can still report the old image after a layer is deleted;
+    gimp-image-get-item-position fails for items no longer in the tree, which avoids
+    drawable pixel reads that would kill the plug-in.
+    """
+    if item is None or img is None:
+        return False
+    img = _gimp_resolve_image(img)
+    if img is None:
+        return False
+    item = _gimp_resolve_item(item)
+    if item is None:
+        return False
+    if not _gimp_item_belongs_to_image(item, img):
+        return False
+    gip = getattr(img, "get_item_position", None)
+    if not callable(gip):
+        return True
+    try:
+        pos = gip(item)
+    except Exception:
+        return False
+    try:
+        return int(pos) >= 0
+    except (TypeError, ValueError):
         return False
 
 
@@ -132,6 +181,27 @@ def _gimp_enumerate_images():
         return list(arr)
     except Exception:
         return []
+
+
+def _gimp_image_id_among_open_images(iid):
+    """True if *iid* matches a currently open image (gimp-get-images / list).
+
+    Context image can briefly reference a closed image; get_by_id may still fail
+    or match inconsistently. Cross-check against the authoritative image list
+    before calling image/drawable PDB (get-palette, get-width, etc.).
+    """
+    if iid is None:
+        return False
+    for im in _gimp_enumerate_images():
+        r = _gimp_resolve_image(im)
+        if r is None:
+            continue
+        try:
+            if r.get_id() == iid:
+                return True
+        except Exception:
+            continue
+    return False
 
 
 def _gimp_context_get_image_try():
@@ -226,26 +296,51 @@ class MinecraftSkin3DWindow(Gtk.Window):
 
         With several images open and no context_get_image in the binding, we pick
         the image with the largest ID (usually the most recently created).
+        Always returns a freshly re-bound Image or None (never a stale proxy).
         """
         im = _gimp_context_get_image_try()
         if im is not None:
-            self._note_work_image(im.get_id())
-            return im
+            rid = _gimp_resolve_image(im)
+            if rid is None or not _gimp_item_is_valid(rid):
+                self._note_work_image(None)
+                return None
+            try:
+                cid = rid.get_id()
+            except Exception:
+                self._note_work_image(None)
+                return None
+            if not _gimp_image_id_among_open_images(cid):
+                self._note_work_image(None)
+                return None
+            self._note_work_image(cid)
+            return rid
 
         all_im = _gimp_enumerate_images()
-        valid = [x for x in all_im if _gimp_item_is_valid(x)]
+        valid = []
+        for x in all_im:
+            r = _gimp_resolve_image(x)
+            if r is not None and _gimp_item_is_valid(r):
+                valid.append(r)
         if not valid:
             self._note_work_image(None)
             return None
         if len(valid) == 1:
-            self._note_work_image(valid[0].get_id())
-            return valid[0]
+            chosen = valid[0]
+        else:
+            try:
+                chosen = max(valid, key=lambda z: z.get_id())
+            except Exception:
+                chosen = valid[0]
         try:
-            im = max(valid, key=lambda z: z.get_id())
+            cid = chosen.get_id()
         except Exception:
-            im = valid[0]
-        self._note_work_image(im.get_id())
-        return im
+            self._note_work_image(None)
+            return None
+        if not _gimp_image_id_among_open_images(cid):
+            self._note_work_image(None)
+            return None
+        self._note_work_image(cid)
+        return chosen
 
     def _note_work_image(self, new_id):
         if new_id == self._work_image_id:
@@ -277,15 +372,21 @@ class MinecraftSkin3DWindow(Gtk.Window):
         img = _gimp_resolve_image(self._work_image())
         if img is None:
             return None
-        drawables = img.get_selected_drawables()
+        try:
+            drawables = img.get_selected_drawables()
+        except Exception:
+            drawables = []
         if drawables:
             d = _gimp_resolve_item(drawables[0])
-            if d is not None and _gimp_item_belongs_to_image(d, img):
+            if d is not None and _gimp_item_in_image_tree(d, img):
                 return d
-        layers = img.get_layers()
+        try:
+            layers = img.get_layers()
+        except Exception:
+            layers = []
         if layers:
             d = _gimp_resolve_item(layers[0])
-            if d is not None and _gimp_item_belongs_to_image(d, img):
+            if d is not None and _gimp_item_in_image_tree(d, img):
                 return d
         return None
 
@@ -640,8 +741,11 @@ class MinecraftSkin3DWindow(Gtk.Window):
         try:
             d = self._get_drawable()
             if d:
-                _log(f"  drawable: {d.get_name()}, "
-                     f"{d.get_width()}x{d.get_height()}, bpp={d.get_bpp()}")
+                try:
+                    nm = d.get_name()
+                except Exception:
+                    nm = "?"
+                _log(f"  drawable: {nm} (size/bpp omitted — avoids PDB on close)")
         except Exception:
             pass
 
@@ -677,13 +781,6 @@ class MinecraftSkin3DWindow(Gtk.Window):
                         _log(f"  [{name}] found (params unavailable)")
                 else:
                     _log(f"  [{name}] NOT FOUND")
-
-        _log("  --- Image undo attrs ---")
-        img = self._work_image()
-        if img is not None:
-            for attr in dir(img):
-                if "undo" in attr.lower():
-                    _log(f"  image.{attr}")
 
         _log("=== end ===")
 
@@ -728,8 +825,26 @@ class MinecraftSkin3DWindow(Gtk.Window):
             self._fuzzy_drag = None
             return
 
-        drawable = _gimp_resolve_item(fd.get("drawable"))
-        if drawable is None:
+        img = _gimp_resolve_image(self._work_image())
+        if img is None:
+            self._fuzzy_drag = None
+            return
+        did = fd.get("drawable_id")
+        drawable = None
+        if did is not None:
+            for cls in (getattr(Gimp, "Item", None), getattr(Gimp, "Drawable", None)):
+                if cls is None:
+                    continue
+                fn = getattr(cls, "get_by_id", None)
+                if not callable(fn):
+                    continue
+                try:
+                    drawable = fn(did)
+                except Exception:
+                    drawable = None
+                if drawable is not None:
+                    break
+        if drawable is None or not _gimp_item_in_image_tree(drawable, img):
             self._fuzzy_drag = None
             return
 
@@ -1021,6 +1136,10 @@ class MinecraftSkin3DWindow(Gtk.Window):
         if drawable is None:
             self.status_bar.set_text("Layer was replaced — try again")
             return
+        img0 = _gimp_resolve_image(self._work_image())
+        if img0 is None or not _gimp_item_in_image_tree(drawable, img0):
+            self.status_bar.set_text("Layer was replaced — try again")
+            return
 
         try:
             w, h = drawable.get_width(), drawable.get_height()
@@ -1059,7 +1178,7 @@ class MinecraftSkin3DWindow(Gtk.Window):
                 self._do_fuzzy_select(drawable, x, y, operation=op,
                                       threshold=threshold)
                 self._fuzzy_drag = {
-                    "drawable": drawable,
+                    "drawable_id": drawable.get_id(),
                     "x": x, "y": y,
                     "operation": op,
                     "base_threshold": threshold,
@@ -1077,6 +1196,13 @@ class MinecraftSkin3DWindow(Gtk.Window):
         fn = getattr(Gimp, func_attr, None)
         if fn is None:
             raise RuntimeError(f"Gimp.{func_attr} not available")
+
+        drawable = _gimp_resolve_item(drawable)
+        if drawable is None:
+            raise RuntimeError("drawable no longer valid")
+        img = _gimp_resolve_image(self._work_image())
+        if img is None or not _gimp_item_in_image_tree(drawable, img):
+            raise RuntimeError("drawable no longer valid")
 
         strokes = [x, y]
 
@@ -1096,15 +1222,28 @@ class MinecraftSkin3DWindow(Gtk.Window):
         if fill_type is None:
             fill_type = Gimp.FillType.FOREGROUND
         self._do_fuzzy_select(drawable, x, y)
-        Gimp.drawable_edit_fill(drawable, fill_type)
-        img = self._work_image()
+        d = _gimp_resolve_item(drawable)
+        img = _gimp_resolve_image(self._work_image())
+        if d is None or img is None or not _gimp_item_in_image_tree(d, img):
+            return
+        Gimp.drawable_edit_fill(d, fill_type)
+        img = _gimp_resolve_image(self._work_image())
         if img is not None:
-            Gimp.Selection.none(img)
+            try:
+                Gimp.Selection.none(img)
+            except Exception:
+                pass
 
     # -- color picker -----------------------------------------------------
 
     def _do_color_pick(self, drawable, x, y):
         """Pick the color at (x, y) and set it as the foreground color."""
+        drawable = _gimp_resolve_item(drawable)
+        if drawable is None:
+            raise RuntimeError("drawable no longer valid")
+        img = _gimp_resolve_image(self._work_image())
+        if img is None or not _gimp_item_in_image_tree(drawable, img):
+            raise RuntimeError("drawable no longer valid")
         if _Gegl is not None:
             try:
                 color = drawable.get_pixel(int(x), int(y))
@@ -1136,6 +1275,8 @@ class MinecraftSkin3DWindow(Gtk.Window):
         img = _gimp_resolve_image(self._work_image())
         if img is None:
             raise RuntimeError("no open image for fuzzy select")
+        if not _gimp_item_in_image_tree(drawable, img):
+            raise RuntimeError("drawable no longer valid")
 
         # Strategy 1: direct GI method on Image
         fn = getattr(img, "select_contiguous_color", None)
@@ -1277,6 +1418,9 @@ class MinecraftSkin3DWindow(Gtk.Window):
         if width == 0 or height == 0:
             return
 
+        img = _gimp_resolve_image(img)
+        if img is None:
+            return
         try:
             layers = img.get_layers()
         except Exception:
@@ -1290,7 +1434,7 @@ class MinecraftSkin3DWindow(Gtk.Window):
             except Exception:
                 continue
             lr = _gimp_resolve_item(l)
-            if lr is not None and _gimp_item_belongs_to_image(lr, img):
+            if lr is not None and _gimp_item_in_image_tree(lr, img):
                 visible.append(lr)
 
         if not visible:
@@ -1314,8 +1458,11 @@ class MinecraftSkin3DWindow(Gtk.Window):
         composite = bytearray(width * height * 4)
 
         for layer in reversed(visible_layers):
+            img = _gimp_resolve_image(img)
+            if img is None:
+                return
             layer = _gimp_resolve_item(layer)
-            if layer is None or not _gimp_item_belongs_to_image(layer, img):
+            if layer is None or not _gimp_item_in_image_tree(layer, img):
                 continue
             try:
                 lw = layer.get_width()
@@ -1338,7 +1485,7 @@ class MinecraftSkin3DWindow(Gtk.Window):
             opacity = layer.get_opacity() / 100.0
 
             layer = _gimp_resolve_item(layer)
-            if layer is None or not _gimp_item_belongs_to_image(layer, img):
+            if layer is None or not _gimp_item_in_image_tree(layer, img):
                 continue
             try:
                 buf = layer.get_buffer()
@@ -1378,13 +1525,16 @@ class MinecraftSkin3DWindow(Gtk.Window):
 
     def _sync_texture_from_drawable(self, drawable, width, height, img):
         """Read pixels from a single drawable (fallback)."""
+        img = _gimp_resolve_image(img)
+        if img is None:
+            return
         drawable = _gimp_resolve_item(drawable)
-        if drawable is None or not _gimp_item_belongs_to_image(drawable, img):
+        if drawable is None or not _gimp_item_in_image_tree(drawable, img):
             return
         if _Gegl is not None:
             try:
                 d = _gimp_resolve_item(drawable)
-                if d is None or not _gimp_item_belongs_to_image(d, img):
+                if d is None or not _gimp_item_in_image_tree(d, img):
                     return
                 buf = d.get_buffer()
                 rect = _Gegl.Rectangle.new(0, 0, width, height)
@@ -1410,8 +1560,11 @@ class MinecraftSkin3DWindow(Gtk.Window):
         """Read pixels one-by-one via Gimp.Drawable.get_pixel / Gegl.Color."""
         pixels = bytearray(width * height * 4)
         for y in range(height):
+            im = _gimp_resolve_image(img)
+            if im is None:
+                return
             d = _gimp_resolve_item(drawable)
-            if d is None or not _gimp_item_belongs_to_image(d, img):
+            if d is None or not _gimp_item_in_image_tree(d, im):
                 return
             for x in range(width):
                 try:
@@ -1436,8 +1589,11 @@ class MinecraftSkin3DWindow(Gtk.Window):
 
         pixels = bytearray(width * height * 4)
         for y in range(height):
+            im = _gimp_resolve_image(img)
+            if im is None:
+                return
             d = _gimp_resolve_item(drawable)
-            if d is None or not _gimp_item_belongs_to_image(d, img):
+            if d is None or not _gimp_item_in_image_tree(d, im):
                 return
             for x in range(width):
                 config = proc.create_config()
