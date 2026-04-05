@@ -62,10 +62,10 @@ class BoxPart:
     """A single box in the player model."""
 
     __slots__ = ("name", "origin", "size", "uv_origin", "inflate", "uvs",
-                 "pivot", "rotation")
+                 "pivot", "rotation", "flip_bottom_face_uv")
 
     def __init__(self, name, origin, size, uv_origin, inflate=0.0,
-                 pivot=None, rotation=None):
+                 pivot=None, rotation=None, flip_bottom_face_uv=False):
         self.name = name
         ox, oy, oz = origin
         w, h, d = size
@@ -77,6 +77,7 @@ class BoxPart:
         self.uvs = _box_uvs(uv_origin[0], uv_origin[1], w, h, d)
         self.pivot = pivot or (ox + w / 2, oy + h / 2, oz + d / 2)
         self.rotation = rotation or (0, 0, 0)
+        self.flip_bottom_face_uv = flip_bottom_face_uv
 
     def get_face_quads(self):
         """
@@ -158,9 +159,16 @@ class BoxPart:
         verts = [
             (x0, y0, z1), (x1, y0, z1), (x1, y0, z0), (x0, y0, z0)
         ]
-        uvs = [
-            (u0, v1), (u1, v1), (u1, v0), (u0, v0)
-        ]
+        # Head + hat: Minecraft's underside texel layout matches the box unwrap
+        # but needs UV corners rotated 180° vs other body parts for this mesh.
+        if self.flip_bottom_face_uv:
+            uvs = [
+                (u1, v0), (u0, v0), (u0, v1), (u1, v1)
+            ]
+        else:
+            uvs = [
+                (u0, v1), (u1, v1), (u1, v0), (u0, v0)
+            ]
         quads.append((face, verts, uvs))
 
         return quads
@@ -253,7 +261,7 @@ class SteveModel(PlayerModel):
 
         self.base_parts = [
             BoxPart("head",     (-4, 24, -4), (8, 8, 8),   (0, 0),
-                    pivot=(0, 24, 0)),
+                    pivot=(0, 24, 0), flip_bottom_face_uv=True),
             BoxPart("body",     (-4, 12, -2), (8, 12, 4),  (16, 16),
                     pivot=(0, 24, 0)),
             BoxPart("rightArm", (-8, 12, -2), (4, 12, 4),  (40, 16),
@@ -268,7 +276,7 @@ class SteveModel(PlayerModel):
 
         self.overlay_parts = [
             BoxPart("hat",          (-4, 24, -4), (8, 8, 8),  (32, 0),
-                    inflate=0.5, pivot=(0, 24, 0)),
+                    inflate=0.5, pivot=(0, 24, 0), flip_bottom_face_uv=True),
             BoxPart("jacket",       (-4, 12, -2), (8, 12, 4), (16, 32),
                     inflate=0.5, pivot=(0, 24, 0)),
             BoxPart("rightSleeve",  (-8, 12, -2), (4, 12, 4), (40, 32),
@@ -290,7 +298,7 @@ class AlexModel(PlayerModel):
 
         self.base_parts = [
             BoxPart("head",     (-4, 24, -4), (8, 8, 8),   (0, 0),
-                    pivot=(0, 24, 0)),
+                    pivot=(0, 24, 0), flip_bottom_face_uv=True),
             BoxPart("body",     (-4, 12, -2), (8, 12, 4),  (16, 16),
                     pivot=(0, 24, 0)),
             BoxPart("rightArm", (-7, 12, -2), (3, 12, 4),  (40, 16),
@@ -305,7 +313,7 @@ class AlexModel(PlayerModel):
 
         self.overlay_parts = [
             BoxPart("hat",          (-4, 24, -4), (8, 8, 8),  (32, 0),
-                    inflate=0.5, pivot=(0, 24, 0)),
+                    inflate=0.5, pivot=(0, 24, 0), flip_bottom_face_uv=True),
             BoxPart("jacket",       (-4, 12, -2), (8, 12, 4), (16, 32),
                     inflate=0.5, pivot=(0, 24, 0)),
             BoxPart("rightSleeve",  (-7, 12, -2), (3, 12, 4), (40, 32),

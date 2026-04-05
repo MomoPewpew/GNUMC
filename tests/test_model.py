@@ -113,6 +113,17 @@ class TestBoxPart:
         names = {n for n, _, _ in part.get_face_quads()}
         assert names == {"front", "back", "left", "right", "top", "bottom"}
 
+    def test_flip_bottom_face_uv_rotates_bottom_texels_180(self):
+        urect = _box_uvs(0, 0, 4, 4, 4)["bottom"]
+        u0, v0, u1, v1 = urect
+        plain = BoxPart("p", (0, 0, 0), (4, 4, 4), (0, 0))
+        flipped = BoxPart("f", (0, 0, 0), (4, 4, 4), (0, 0),
+                         flip_bottom_face_uv=True)
+        pb = next(uv for n, _, uv in plain.get_face_quads() if n == "bottom")
+        fb = next(uv for n, _, uv in flipped.get_face_quads() if n == "bottom")
+        assert pb == [(u0, v1), (u1, v1), (u1, v0), (u0, v0)]
+        assert fb == [(u1, v0), (u0, v0), (u0, v1), (u1, v1)]
+
 
 # ---------------------------------------------------------------------------
 # SteveModel / AlexModel
